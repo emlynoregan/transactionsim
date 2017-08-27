@@ -1,0 +1,273 @@
+<html>
+  <head>
+    <title>
+      Transaction Sim
+    </title>  
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/icon.css">
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/color.css">
+    <link rel="stylesheet" type="text/css" href="/css/easyui.css">
+    <link rel="stylesheet" type="text/css" href="/css/studio.css">
+    <script type="text/javascript" src="https://code.jquery.com/jquery-1.6.min.js"></script>
+    <script type="text/javascript" src="/easyui/jquery.easyui.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mustache.js/2.2.0/mustache.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.10.1/lodash.min.js"></script>
+  	<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  </head>
+  <body>
+    <div id="layoutMain" class="easyui-layout" style="width:100%;height:100%">
+        <div data-options="region:'center'">
+			<div id="tt" class="easyui-tabs" data-options="onSelect:OnSelect" style="width: 100%; height: 100%;">
+				<div title="Parameters" data-options="selected:true" style="padding:0px;">
+					<div class="ss-item">
+						<div>Total number of Tasks to Add</div>
+						<input id="numtasks" class="easyui-numberbox" precision="0" min=1 value="100">
+					</div>
+					<div class="ss-item">
+						<div>Maximum Tasks to Add per Tick</div>
+						<input id="addtaskspertick" class="easyui-numberbox" precision="0" min=1 value="100">
+					</div>
+					<div class="ss-item">
+						<div>Maximum Tasks to Process per Tick</div>
+						<input id="processtaskspertick" class="easyui-numberbox" precision="0" min=1 value="1">
+					</div>
+<!-- 					<div class="ss-item">
+						<div>Exponential Backoff</div>
+						<input id="backoff" class="easyui-switchbutton" data-options="onChange:BackoffSwitch" >
+					</div> -->
+		       	</div>
+		        <div title="Results" style="padding:0px;">	
+					<div class="ss-item">
+						<div>Tasks Processed</div>
+						<input id="tasksprocessed" class="easyui-numberbox" precision="0" data-options="readonly:true">
+					</div>
+					<div class="ss-item">
+						<div>Ticks to completion</div>
+						<input id="totalticks" class="easyui-numberbox" precision="0" data-options="readonly:true">
+					</div>
+					<div class="ss-item">
+						<div>Transient Task Failures (Retries)</div>
+						<input id="taskretries" class="easyui-numberbox" precision="0" data-options="readonly:true">
+					</div>
+					<div class="ss-item">
+						<div>Total Work Done (processed + failures)</div>
+						<input id="totalwork" class="easyui-numberbox" precision="0" data-options="readonly:true">
+					</div>
+					<div class="ss-item">
+						<div>Efficiency (tasks processed / total work)</div>
+						<input id="efficiency" class="easyui-numberbox" precision="4" data-options="readonly:true">
+					</div>
+		       	</div>    
+		        <div title="Graph" style="padding:0px;">	
+					<div class="ss-item">
+					  <div id="chart_div" width="95%" height="700"></div>
+				  	</div>
+		       	</div>    
+			</div>    
+		</div>
+	</div>
+	<script>
+    var getUrlVars = function()
+    {
+        var vars = [], hash;
+        var args = window.location.href.slice(window.location.href.indexOf('?') + 1)
+        if (args.indexOf('#') >= 0)
+    		args = args.slice(0, args.indexOf('#'))
+        var hashes = args.split('&');
+        for(var i = 0; i < hashes.length; i++)
+        {
+            hash = hashes[i].split('=');
+            vars.push(hash[0]);
+            vars[hash[0]] = hash[1];
+        }
+        return vars;
+    }
+
+	var _params = null;
+	var _ticks = [];
+	var _results = null;
+// 	var _backoff = false;
+
+// 	var BackoffSwitch = function()
+// 	{
+// 		_backoff = !_backoff;
+// 	}	    
+
+	var SetParameters = function(urlvars)
+	{
+		var SetParameterFromUrl = function(argname, def)
+		{
+			$('#' + argname).numberbox('setValue', parseInt(urlvars[argname]) || def);
+		}
+
+		SetParameterFromUrl("numtasks", 100);
+		SetParameterFromUrl("addtaskspertick", 100);
+		SetParameterFromUrl("processtaskspertick", 1);
+	}
+
+	var GetParameters = function()
+	{
+		_params = {
+			numtasks: parseInt($('#numtasks').numberbox('getValue')),
+			addtaskspertick: parseInt($('#addtaskspertick').numberbox('getValue')),
+			processtaskspertick: parseInt($('#processtaskspertick').numberbox('getValue'))
+// 			backoff: _backoff
+		}
+	}
+
+	var SetResults = function()
+	{
+		$('#tasksprocessed').numberbox('setValue', _results.tasksprocessed);
+		$('#totalticks').numberbox('setValue', _results.totalticks);
+		$('#taskretries').numberbox('setValue', _results.taskretries);
+		$('#totalwork').numberbox('setValue', _results.tasksprocessed + _results.taskretries);
+		$('#efficiency').numberbox('setValue', _results.tasksprocessed / (_results.tasksprocessed + _results.taskretries));
+	}
+
+	function drawChart() {
+	  var rawdata = [
+	  	['Measure', 'Processed', 'Added', 'Retry']
+	  ];
+
+	  var numcols = _ticks.length;
+	  if (numcols > 400)
+	  	numcols = 400;
+
+	  var currbin = 0;
+
+	  for (ix = 0; ix < _ticks.length; ix++)
+	  {
+		var thisbin = Math.floor(ix * numcols / _ticks.length);
+		if (thisbin == currbin)
+		{
+			currbin += 1;
+
+			var tick = _ticks[ix];
+
+			var tasksprocessed = tick.tasksprocessed;
+			var tasksadded = tick.tasksadded;
+			var tasksnotprocessed = tick.tasksnotprocessed;
+
+			var tasksaddedforstack;
+			if (tasksadded > (tasksprocessed))
+			{
+				tasksaddedforstack = tasksadded - (tasksprocessed);
+			}
+			else
+			{
+				tasksaddedforstack = 0;
+			}
+
+			var tasksnotprocessedforstack;
+			if (tasksnotprocessed > (tasksaddedforstack))
+			{
+				tasksnotprocessedforstack = tasksnotprocessed - (tasksaddedforstack);
+			}
+			else
+			{
+				tasksnotprocessedforstack = 0;
+			}
+
+			rawdata.push(
+				["Tick " + ix, tasksprocessed, tasksaddedforstack, tasksnotprocessedforstack]
+			);
+		}
+	  }
+
+     var data = google.visualization.arrayToDataTable(rawdata);
+
+      var options = {
+        height: $(document).height() - 100,
+        legend: { position: 'top', maxLines: 3 },
+        bar: { groupWidth: '75%' },
+        isStacked: true,
+      };
+      
+      var chart = new google.visualization.ColumnChart(
+        document.getElementById('chart_div'));
+
+      chart.draw(data, options);
+    }
+
+    var Calculate = function()
+    {
+		GetParameters();
+
+		_ticks = [];
+
+		var lasttick = {
+			tasksnotadded: _params.numtasks,
+			taskprocessed: 0,
+			tasksnotprocessed: 0
+		};
+
+		var taskretries = 0;
+		var totalticks = 0;
+
+		while (lasttick.tasksnotadded + lasttick.tasksnotprocessed)
+		{
+			var taskstoadd = _params.addtaskspertick;
+
+			if (taskstoadd > lasttick.tasksnotadded)
+				taskstoadd = lasttick.tasksnotadded;
+				
+			var tasksnotadded = lasttick.tasksnotadded - taskstoadd;
+
+			var numtasks = lasttick.tasksnotprocessed + taskstoadd;
+
+			var tasksprocessed = _params.processtaskspertick;
+			if (tasksprocessed > numtasks)
+				tasksprocessed = numtasks;
+
+			var tasksnotprocessed = numtasks - tasksprocessed;
+
+			taskretries += tasksnotprocessed;
+			totalticks += 1;
+
+			var tick = {
+				tasksnotadded: tasksnotadded,
+				tasksadded: taskstoadd,
+				tasksprocessed: tasksprocessed,
+				tasksnotprocessed: tasksnotprocessed
+			}
+
+			_ticks.push(tick);
+			lasttick = tick;
+		}
+
+		_results = {
+			tasksprocessed: _params.numtasks,
+			taskretries: taskretries,
+			totalticks: totalticks
+		};
+
+		SetResults();
+		drawChart();
+    }
+
+    var OnSelect = function(title, index)
+	{
+		if (index)
+		{
+			Calculate();
+		}
+	}
+
+    $( document ).ready(function() {
+		google.charts.load('current', {packages: ['corechart', 'bar']});
+		google.charts.setOnLoadCallback(drawChart);
+
+	    var lurlVars = getUrlVars();
+
+		SetParameters(lurlVars);
+
+	    var ldefaultTab = parseInt(lurlVars["tab"]);
+	    if (!ldefaultTab)
+	    	ldefaultTab = 0;
+	
+	    $('#tt').tabs('select', ldefaultTab);
+
+	    	
+    });
+    </script>
+   </body>
+</html>

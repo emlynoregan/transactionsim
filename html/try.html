@@ -1,0 +1,196 @@
+<html>
+  <head>
+    <title>
+		{% if decl%}
+			{{decl.name}}
+		{% else %}
+		    no declaration found
+		{% endif %}
+    </title>  
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/icon.css">
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/color.css">
+    <link rel="stylesheet" type="text/css" href="/css/easyui.css">
+    <link rel="stylesheet" type="text/css" href="/css/studio.css">
+	<link rel="alternate" type="application/json+oembed"
+	  href="http://sutl-studio.appspot.com/oembed.json?url={{url}}"
+	  title="sUTL Try embed profile" />
+    <script type="text/javascript" src="https://code.jquery.com/jquery-1.6.min.js"></script>
+    <script type="text/javascript" src="/easyui/jquery.easyui.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mustache.js/2.2.0/mustache.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.10.1/lodash.min.js"></script>
+  </head>
+  <body>
+    <div id="layoutMain" class="easyui-layout" style="width:100%;height:100%">
+    {% if decl %}
+        <div data-options="region:'center'">
+			<div id="tt" class="easyui-tabs" data-options="onSelect:OnSelect" style="width: 100%; height: 100%;">
+				<div title="Transform" data-options="selected:true" style="padding:0px;">	
+					<div class="ss-item">
+						<div id="edTransform" class="editor" name="transform" style="min-width: 200px; width:100%; height:90%;"></div>
+						<div id="transformmsg" class="message"></div>
+					</div>
+		       	</div>    
+		        <div title="Source" style="padding:0px;">	
+		           	<div class="ss-item">
+						<div id="edSource" class="editor" name="source" style="min-width: 200px; width:100%; height:90%;"></div>
+		               	<div id="sourcemsg" class="message"></div>
+					</div>
+		       	</div>    
+		        <div title="Result" style="padding:0px;">	
+		           	<div class="ss-item">
+						<div id="edResult" class="editor" name="result" style="min-width: 200px; width:100%; height:90%;"></div>
+					</div>
+		       	</div>    
+		        <div title="Declaration" style="padding:0px;">	
+					<div class="ss-item">
+						<div id="edDeclaration" class="editor" name="declaration" style="min-width: 200px; width:100%; height:90%;"></div>
+					</div>
+				</div>
+			</div>    
+		</div>
+	{% else %}
+	    No sUTL declaration found
+	{% endif %}
+	</div>
+<div style="display:none" id="inittransform">{{transform}}</div>
+<div style="display:none" id="initsource">{{source}}</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.2.0/ace.js" type="text/javascript" charset="utf-8"></script>
+    <script type="text/javascript" src="js/sUTLHaxeJS/sUTL.js"></script>
+    <script>
+    var getUrlVars = function()
+    {
+        var vars = [], hash;
+        var args = window.location.href.slice(window.location.href.indexOf('?') + 1)
+        if (args.indexOf('#') >= 0)
+    		args = args.slice(0, args.indexOf('#'))
+        var hashes = args.split('&');
+        for(var i = 0; i < hashes.length; i++)
+        {
+            hash = hashes[i].split('=');
+            vars.push(hash[0]);
+            vars[hash[0]] = hash[1];
+        }
+        return vars;
+    }
+    
+    var setupEditor = function(aId, aReadOnly)
+    {
+        var editor = ace.edit(aId);
+        editor.setTheme("ace/theme/monokai");
+        editor.getSession().setMode("ace/mode/json");
+        editor.getSession().setTabSize(2);
+        editor.getSession().setUseSoftTabs(true);
+        editor.setFontSize(14);
+        editor.setReadOnly(aReadOnly);
+        return editor;
+    };
+    
+    var forceUpdate = function(aEditor)
+    {
+    	aEditor.resize(true);
+    }
+
+    var linitialTransformStr = $("#inittransform").text(); 
+    var linitialSourceStr = $("#initsource").text(); 
+    var ldecl = {{decl | safe}};
+    var llib = {{lib | safe}};
+    
+    var _edSource = null;
+    var _edTransform = null;
+    var _edResult = null;
+    var _edDeclaration = null;
+
+    var OnSelect = function(title, index)
+	{
+		forceUpdate(_edSource);
+    	forceUpdate(_edResult);
+    	forceUpdate(_edDeclaration);
+	}
+
+	_edSource = setupEditor("edSource", false);
+	_edTransform = setupEditor("edTransform", false);
+	_edResult = setupEditor("edResult", true);
+	_edDeclaration = setupEditor("edDeclaration", true);
+
+    $( document ).ready(function() {
+	    var lurlVars = getUrlVars();
+	    var ldefaultTab = parseInt(lurlVars["tab"]);
+	    if (!ldefaultTab)
+	    	ldefaultTab = 0;
+	
+	//    $('#accBody').tabs({
+	//    	selected:2
+	//    });
+	    $('#tt').tabs('select', ldefaultTab);
+	    	
+		var edix = -1;
+	  	if (linitialSourceStr)
+	  		_edSource.setValue(linitialSourceStr, edix);
+		else
+			_edSource.setValue("", edix);
+	
+	  	if (ldecl)
+	  	{
+	  		_edTransform.setValue(linitialTransformStr, edix);
+	  		_edDeclaration.setValue(JSON.stringify(ldecl, null, 2), edix);
+	  	}
+		else
+		{
+			_edTransform.setValue("", edix);
+	  		_edDeclaration.setValue("", edix);
+		}
+		
+		_edResult.setValue("", edix);
+	
+		var lupdateResult = function() {
+	        try
+	        {
+	            var lsource = JSON.parse(_edSource.getValue());
+	            var ltransform = JSON.parse(_edTransform.getValue());
+	            //var ldecl = jQuery.extend(true, {}, ldecl);
+	            ldecl["transform-t"] = ltransform;
+	
+	            _edDeclaration.setValue(JSON.stringify(ldecl, null, 2), edix);
+	
+	            var lresult = null;
+	
+	            var clresult;
+		        
+	            var s = new Sutl();
+	            
+	            clresult = s.compilelib([ldecl], [llib]);
+	
+	            if (!clresult)
+	            {
+	                lresult = "** Can't load libs **";
+	            }
+	            else if ("fail" in clresult)
+	            {
+	                lresult = clresult["fail"];
+	            }
+	            else
+	            {
+	                lresult = s.evaluate(lsource, ldecl["transform-t"], clresult["lib"] || {}, 0);
+	            }
+	
+	            _edResult.setValue(JSON.stringify(lresult, null, 2), edix);
+	        }
+	        catch (e)
+	        {
+	            console.log(e);
+	            var lerrorMessage = "Result Exception: " + e.message;
+	            _edResult.setValue(lerrorMessage, edix);
+	        }
+	    }
+	
+		lupdateResult();
+		
+		_edSource.getSession().on('change', lupdateResult);
+		_edTransform.getSession().on('change', lupdateResult);
+	
+		forceUpdate(_edTransform);
+		//forceUpdate(_edSource);
+    });
+    </script>
+   </body>
+</html>
